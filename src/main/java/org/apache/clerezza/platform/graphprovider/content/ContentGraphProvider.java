@@ -27,6 +27,8 @@ import org.apache.clerezza.platform.Constants;
 import org.osgi.service.component.ComponentContext;
 import org.apache.clerezza.commons.rdf.Graph;
 import org.apache.clerezza.commons.rdf.IRI;
+import org.apache.clerezza.commons.rdf.WatchableGraph;
+import org.apache.clerezza.commons.rdf.impl.utils.WatchableGraphWrapper;
 import org.apache.clerezza.rdf.core.access.NoSuchEntityException;
 import org.apache.clerezza.rdf.core.access.TcManager;
 import org.apache.clerezza.rdf.utils.UnionGraph;
@@ -76,6 +78,7 @@ public class ContentGraphProvider {
     private IRI[] additions;
 
     private ReentrantReadWriteLock configLock = new ReentrantReadWriteLock();
+    private WatchableGraph contentGraph = null;
 
     protected void activate(ComponentContext context) {
         try {
@@ -92,21 +95,31 @@ public class ContentGraphProvider {
         }
     }
 
-    public Graph getContentGraph() {
+    public WatchableGraph getContentGraph() {
         configLock.readLock().lock();
         try {
-            Graph[] united = new Graph[additions.length + 1];
-            int i = 0;
-            united[i++] = tcManager.getGraph(Constants.CONTENT_GRAPH_URI);
-            for (IRI uriRef : additions) {
-                united[i++] = tcManager.getGraph(uriRef);
+            if (contentGraph == null) {
+                Graph[] united = new Graph[additions.length + 1];
+                int i = 0;
+                united[i++] = tcManager.getGraph(Constants.CONTENT_GRAPH_URI);
+                for (IRI uriRef : additions) {
+                    united[i++] = tcManager.getGraph(uriRef);
+                }
+                contentGraph = new WatchableGraphWrapper(new UnionGraph(united));
             }
-            return new UnionGraph(united);
+            return contentGraph;
         } finally {
             configLock.readLock().unlock();
         }
     }
 
+    /**
+     * Adds the graph specified by name to the content graph. Note that a new 
+     * WachableGraph will be returned by getContentGraph that does consider
+     * listeners added to the previous instance.
+     * 
+     * @param graphName 
+     */
     public void addTemporaryAdditionGraph(IRI graphName) {
         configLock.writeLock().lock();
         try {
@@ -114,11 +127,19 @@ public class ContentGraphProvider {
                     .asList(additions));
             additionsSet.add(graphName);
             additions = additionsSet.toArray(new IRI[additionsSet.size()]);
+            contentGraph = null;
         } finally {
             configLock.writeLock().unlock();
         }
     }
 
+    /**
+     * Removes the graph specified by name to the content graph. Note that a new 
+     * WachableGraph will be returned by getContentGraph that does consider
+     * listeners added to the previous instance.
+     * 
+     * @param graphName 
+     */
     public void removeTemporaryAdditionGraph(IRI graphName) {
         configLock.writeLock().lock();
         try {
@@ -126,6 +147,7 @@ public class ContentGraphProvider {
                     .asList(additions));
             additionsSet.remove(graphName);
             additions = additionsSet.toArray(new IRI[additionsSet.size()]);
+            contentGraph = null;
         } finally {
             configLock.writeLock().unlock();
         }
